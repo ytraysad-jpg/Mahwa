@@ -33,26 +33,35 @@ async function getHtml(path: string): Promise<string> {
 
 const clean = (s: string) => s.replace(/\s+/g, " ").trim();
 
-function titleFromText(text: string, slug: string): string {
-  const t = clean(text);
-  // teks kartu biasanya "<judul> <badge> <judul>"
-  const m = t.match(/^(.+?)(?:\s+.{0,40}?)?\s*\1$/);
-  if (m) return m[1].trim();
-  return t || slug.replace(/-/g, " ");
+const BADGES = new Set(["editors pick","trending","mature","erotica","suggestive","end","hiatus",
+  "ongoing","project","premium","new","berlanjut","tamat","manga","manhwa","manhua"]);
+
+function titleFromAnchor($: cheerio.CheerioAPI, el: any, slug: string): string {
+  const parts: string[] = [];
+  $(el).find("*").addBack().contents().each((_: number, n: any) => {
+    if (n.type === "text") {
+      const t = clean(n.data ?? "");
+      if (t && !BADGES.has(t.toLowerCase())) parts.push(t);
+    }
+  });
+  parts.sort((a, b) => b.length - a.length);
+  return parts[0] || slug.replace(/-/g, " ");
 }
 
 function parseCards(html: string): ComicCard[] {
   const $ = cheerio.load(html);
-  const seen = new Set<string>();
-  const out: ComicCard[] = [];
+  const map = new Map<string, ComicCard>();
   $("a[href]").each((_, el) => {
     const href = $(el).attr("href") ?? "";
     const m = href.match(/(?:^|\.re)\/comic\/([^/?#]+)\/?$/);
-    if (!m || seen.has(m[1])) return;
-    seen.add(m[1]);
-    out.push({ slug: m[1], title: titleFromText($(el).text(), m[1]) });
+    if (!m) return;
+    const title = titleFromAnchor($, el, m[1]);
+    const old = map.get(m[1]);
+    // ganti judul lama kalau masih huruf kecil semua / lebih pendek
+    if (!old || old.title === old.title.toLowerCase() || (title.length > old.title.length && /[A-Z]/.test(title)))
+      map.set(m[1], { slug: m[1], title });
   });
-  return out;
+  return [...map.values()];
 }
 
 export const getHome = () =>
