@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="id"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Manhwa Reader</title>
+<style>
+:root{--bg:#fff;--fg:#111;--card:#f2f2f4;--ac:#6d5dfc}
+@media(prefers-color-scheme:dark){:root{--bg:#0f0f12;--fg:#eee;--card:#1b1b21}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px system-ui,sans-serif}
+header{position:sticky;top:0;z-index:5;background:var(--bg);padding:10px 14px;display:flex;gap:10px;align-items:center;border-bottom:1px solid #8883}
+header a{color:var(--fg);text-decoration:none;font-weight:700}
+input{flex:1;padding:8px 10px;border-radius:8px;border:1px solid #8885;background:var(--card);color:var(--fg)}
+main{max-width:900px;margin:auto;padding:14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:12px}
+.card{background:var(--card);border-radius:10px;overflow:hidden;text-decoration:none;color:inherit}
+.card img{width:100%;aspect-ratio:2/3;object-fit:cover;background:#8883;display:block}
+.card span{display:block;padding:6px 8px;font-size:13px}
+.chs{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
+.chs a,.btn{background:var(--card);padding:7px 11px;border-radius:8px;color:inherit;text-decoration:none;border:0;font:inherit;cursor:pointer}
+.btn.p{background:var(--ac);color:#fff}
+.row{display:flex;gap:14px}.row img{width:120px;border-radius:8px}
+.reader img{display:block;width:100%;max-width:800px;margin:0 auto}
+.nav{display:flex;gap:8px;justify-content:center;padding:14px}
+</style></head><body>
+<header><a href="#/">📖 Manhwa</a><input id="q" placeholder="Filter judul di halaman ini…"></header>
+<main id="app">Memuat…</main>
+<script>
+const $=s=>document.querySelector(s), app=$("#app");
+const api=async u=>{const r=await fetch(u);const j=await r.json();if(!r.ok)throw new Error(j.error);return j};
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const img=u=>"/api/img?u="+encodeURIComponent(u);
+
+async function home(){
+  const list=await api("/api/comics?page=1").catch(()=>api("/api/home"));
+  app.innerHTML=`<div class="grid">${list.map(c=>`
+    <a class="card" href="#/c/${c.slug}" data-t="${esc(c.title.toLowerCase())}">
+      <img loading="lazy" src="/api/cover/${c.slug}" alt=""><span>${esc(c.title)}</span></a>`).join("")}</div>`;
+}
+async function comic(slug){
+  const c=await api(`/api/comic/${slug}`), last=c.chapters.at(-1);
+  app.innerHTML=`<div class="row"><img src="${img(c.cover)}" alt="">
+    <div><h2>${esc(c.title)}</h2><p>${esc(c.description)}</p>
+    ${last?`<a class="btn p" href="#/r/${slug}/${last.id}">Baca dari awal</a>`:""}</div></div>
+    <div class="chs">${c.chapters.map(x=>`<a href="#/r/${slug}/${x.id}">${esc(x.label)}</a>`).join("")}</div>`;
+}
+async function read(slug,id){
+  const d=await api(`/api/comic/${slug}/chapter/${id}`);
+  const nav=`<div class="nav">
+    ${d.prev?`<a class="btn" href="#/r/${slug}/${d.prev}">← Sebelumnya</a>`:""}
+    <a class="btn" href="#/c/${slug}">Daftar</a>
+    ${d.next?`<a class="btn p" href="#/r/${slug}/${d.next}">Selanjutnya →</a>`:""}</div>`;
+  app.innerHTML=nav+(d.images.length
+    ?`<div class="reader">${d.images.map(u=>`<img loading="lazy" src="${img(u)}">`).join("")}</div>`
+    :`<p>Gambar tidak ditemukan (mungkin chapter Premium / dimuat lewat JS). Install Playwright untuk fallback.</p>`)+nav;
+  scrollTo(0,0);
+}
+async function route(){
+  const [,k,a,b]=location.hash.split("/");
+  app.textContent="Memuat…";
+  try{ k==="c"?await comic(a):k==="r"?await read(a,b):await home(); }
+  catch(e){ app.innerHTML=`<p>Gagal: ${esc(e.message)}</p>`; }
+}
+$("#q").oninput=e=>document.querySelectorAll(".card").forEach(c=>
+  c.style.display=c.dataset.t.includes(e.target.value.toLowerCase())?"":"none");
+addEventListener("hashchange",route);route();
+</script></body></html>
