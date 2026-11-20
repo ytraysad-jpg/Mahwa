@@ -30,7 +30,8 @@ const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",
 const img=u=>"/api/img?u="+encodeURIComponent(u);
 
 async function home(){
-  const list=await api("/api/comics?page=1").catch(()=>api("/api/home"));
+  let list=await api("/api/comics?page=1").catch(()=>[]);
+  if(!list.length) list=await api("/api/home");
   app.innerHTML=`<div class="grid">${list.map(c=>`
     <a class="card" href="#/c/${c.slug}" data-t="${esc(c.title.toLowerCase())}">
       <img loading="lazy" src="/api/cover/${c.slug}" alt=""><span>${esc(c.title)}</span></a>`).join("")}</div>`;
