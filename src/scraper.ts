@@ -16,13 +16,48 @@ export interface ChapterData {
   debug?: string;
 }
 
-// ---- cache sederhana + delay sopan ----
-const cache = new Map<string, { t: number; v: unknown }>();
-async function cached<T>(key: string, ttlMs: number, fn: () => Promise<T>): Promise<T> {
-  const hit = cache.get(key);
+// ---- cache 2 lapis: memori -> database SQL (Neon Postgres, opsional) ----
+const mem = new Map<string, { t: number; v: unknown }>();
+let sqlP: Promise<any> | null = null;
+
+function db(): Promise<any> | null {
+  const url = process.env.DATABASE_URL || process.env.POSTGRES_URL;
+  if (!url) return null;
+  sqlP ??= (async () => {
+    const { neon } = await import("@neondatabase/serverless");
+    const sql = neon(url);
+    await sql`create table if not exists cache (
+      key text primary key, value jsonb not null, updated_at timestamptz not null default now())`;
+    return sql;
+  })();
+  return sqlP;
+}
+
+async function cached<T>(
+  key: string, ttlMs: number, fn: () => Promise<T>, worthStoring: (v: T) => boolean = () => true,
+): Promise<T> {
+  const hit = mem.get(key);
   if (hit && Date.now() - hit.t < ttlMs) return hit.v as T;
+  try {
+    const sql = await db();
+    if (sql) {
+      const rows = await sql`select value, extract(epoch from now() - updated_at) * 1000 as age
+        from cache where key = ${key}`;
+      if (rows[0] && Number(rows[0].age) < ttlMs) {
+        mem.set(key, { t: Date.now(), v: rows[0].value });
+        return rows[0].value as T;
+      }
+    }
+  } catch (e) { console.error("db read:", e); }
   const v = await fn();
-  cache.set(key, { t: Date.now(), v });
+  mem.set(key, { t: Date.now(), v });
+  if (worthStoring(v)) {
+    try {
+      const sql = await db();
+      if (sql) await sql`insert into cache (key, value) values (${key}, ${JSON.stringify(v)}::jsonb)
+        on conflict (key) do update set value = excluded.value, updated_at = now()`;
+    } catch (e) { console.error("db write:", e); }
+  }
   return v;
 }
 
@@ -123,6 +158,9 @@ function imageSamples(raw: string): string {
 async function renderWithBrowser(url: string): Promise<{ images: string[]; note: string }> {
   let chromium: any, puppeteer: any;
   try {
+    const major = process.versions.node.split(".")[0];
+    process.env.AWS_EXECUTION_ENV ??= `AWS_Lambda_nodejs${major}.x`;
+    process.env.AWS_LAMBDA_JS_RUNTIME ??= `nodejs${major}.x`;
     chromium = (await import("@sparticuz/chromium")).default;
     puppeteer = (await import("puppeteer-core")).default;
   } catch (e: any) { return { images: [], note: "import browser gagal: " + e.message }; }
@@ -168,7 +206,7 @@ async function renderWithBrowser(url: string): Promise<{ images: string[]; note:
 }
 
 export const getChapter = (slug: string, id: string) =>
-  cached(`chapter:${id}`, 10 * 60_000, async (): Promise<ChapterData> => {
+  cached(`chapter:${id}`, 7 * 24 * 3600_000, async (): Promise<ChapterData> => {
     const path = `/comic/${encodeURIComponent(slug)}/chapter/${encodeURIComponent(id)}`;
     const raw = await getHtml(path);
     const $ = cheerio.load(raw);
@@ -186,4 +224,4 @@ export const getChapter = (slug: string, id: string) =>
       return href.match(/\/chapter\/([^/?#]+)/)?.[1] ?? null;
     };
     return { slug, id, images, prev: nav("Sebelumnya"), next: nav("Selanjutnya"), debug };
-  });
+  }, (v) => v.images.length > 0);
