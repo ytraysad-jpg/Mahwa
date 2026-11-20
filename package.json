@@ -10,6 +10,7 @@
   "dependencies": {
     "cheerio": "^1.0.0",
     "express": "^4.21.2",
+    "@neondatabase/serverless": "^0.10.4",
     "@sparticuz/chromium": "^131.0.0",
     "puppeteer-core": "^23.0.0"
   },
