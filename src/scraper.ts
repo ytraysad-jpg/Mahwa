@@ -104,20 +104,27 @@ export const getComic = (slug: string) =>
 const IMG_RE = new RegExp(
   `https?:\\\\?/\\\\?/${CDN_HOST.replace(/\./g, "\\.")}[^"'\\s)<>]+?\\.(?:webp|jpe?g|png|avif)`, "gi");
 
+const BAD = /\/(covers|hero-covers|settings|avatars)\//i;
+const REL_RE = /["'(]((?:comics|chapters|uploads)\/[^"'\\\s)<>]+?\.(?:webp|jpe?g|png|avif))/gi;
+
 function extractImages(raw: string): string[] {
   const text = raw.replace(/\\u0026/g, "&").replace(/\\\//g, "/");
-  const found = text.match(IMG_RE) ?? [];
-  const uniq = [...new Set(found)];
-  // buang cover/logo/hero, sisakan halaman chapter
-  return uniq.filter((u) => !/\/(covers|hero-covers|settings|avatars)\//i.test(u));
+  const abs = text.match(IMG_RE) ?? [];
+  const rel = [...text.matchAll(REL_RE)].map((m) => `https://${CDN_HOST}/${m[1]}`);
+  return [...new Set([...abs, ...rel])].filter((u) => !BAD.test(u));
+}
+
+function imageSamples(raw: string): string {
+  const text = raw.replace(/\\u0026/g, "&").replace(/\\\//g, "/");
+  const m = [...text.matchAll(/[^"'\s]{0,70}\.(?:webp|jpe?g|png|avif)/gi)].map((x) => x[0]);
+  return `cdn=${(text.match(/kaguyacdn/g) ?? []).length}, ext=${m.length}, contoh=[${[...new Set(m)].slice(0, 4).join(" | ")}]`;
 }
 
 async function renderWithBrowser(url: string): Promise<{ images: string[]; note: string }> {
   let chromium: any, puppeteer: any;
   try {
-    const c = "@sparticuz/chromium", p = "puppeteer-core";
-    chromium = (await import(c)).default;
-    puppeteer = (await import(p)).default;
+    chromium = (await import("@sparticuz/chromium")).default;
+    puppeteer = (await import("puppeteer-core")).default;
   } catch (e: any) { return { images: [], note: "import browser gagal: " + e.message }; }
   let browser: any;
   try {
@@ -167,7 +174,7 @@ export const getChapter = (slug: string, id: string) =>
     const $ = cheerio.load(raw);
 
     let images = extractImages(raw);
-    let debug = `html=${raw.length}b, gambar di html=${images.length}`;
+    let debug = `html=${raw.length}b, gambar di html=${images.length}, ${imageSamples(raw)}`;
     if (images.length === 0) {
       const r = await renderWithBrowser(BASE + path);
       images = r.images;
