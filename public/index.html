@@ -51,7 +51,7 @@ async function read(slug,id){
     ${d.next?`<a class="btn p" href="#/r/${slug}/${d.next}">Selanjutnya →</a>`:""}</div>`;
   app.innerHTML=nav+(d.images.length
     ?`<div class="reader">${d.images.map(u=>`<img loading="lazy" src="${img(u)}">`).join("")}</div>`
-    :`<p>Gambar tidak ditemukan (mungkin chapter Premium).</p>`)+nav;
+    :`<p>Gambar tidak ditemukan.</p><pre style="white-space:pre-wrap;font-size:12px;background:var(--card);padding:10px;border-radius:8px">${esc(d.debug||"")}</pre>`)+nav;
   scrollTo(0,0);
 }
 async function route(){
