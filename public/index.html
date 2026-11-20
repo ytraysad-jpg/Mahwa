@@ -51,7 +51,7 @@ async function read(slug,id){
     ${d.next?`<a class="btn p" href="#/r/${slug}/${d.next}">Selanjutnya →</a>`:""}</div>`;
   app.innerHTML=nav+(d.images.length
     ?`<div class="reader">${d.images.map(u=>`<img loading="lazy" src="${img(u)}">`).join("")}</div>`
-    :`<p>Gambar tidak ditemukan (mungkin chapter Premium / dimuat lewat JS). Install Playwright untuk fallback.</p>`)+nav;
+    :`<p>Gambar tidak ditemukan (mungkin chapter Premium).</p>`)+nav;
   scrollTo(0,0);
 }
 async function route(){
