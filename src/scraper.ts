@@ -13,6 +13,7 @@ export interface ComicDetail {
 }
 export interface ChapterData {
   slug: string; id: string; images: string[]; prev: string | null; next: string | null;
+  debug?: string;
 }
 
 // ---- cache sederhana + delay sopan ----
@@ -111,18 +112,21 @@ function extractImages(raw: string): string[] {
   return uniq.filter((u) => !/\/(covers|hero-covers|settings|avatars)\//i.test(u));
 }
 
-async function renderWithBrowser(url: string): Promise<string[]> {
+async function renderWithBrowser(url: string): Promise<{ images: string[]; note: string }> {
   let chromium: any, puppeteer: any;
   try {
     const c = "@sparticuz/chromium", p = "puppeteer-core";
     chromium = (await import(c)).default;
     puppeteer = (await import(p)).default;
-  } catch { return []; }
-  const browser = await puppeteer.launch({
-    args: chromium.args,
-    executablePath: await chromium.executablePath(),
-    headless: true,
-  });
+  } catch (e: any) { return { images: [], note: "import browser gagal: " + e.message }; }
+  let browser: any;
+  try {
+    browser = await puppeteer.launch({
+      args: chromium.args,
+      executablePath: await chromium.executablePath(),
+      headless: true,
+    });
+  } catch (e: any) { return { images: [], note: "launch browser gagal: " + e.message }; }
   try {
     const page = await browser.newPage();
     await page.setUserAgent(UA);
@@ -130,8 +134,11 @@ async function renderWithBrowser(url: string): Promise<string[]> {
     page.on("request", (r: any) =>
       ["font", "stylesheet", "media"].includes(r.resourceType()) ? r.abort() : r.continue());
     const fromApi: string[] = [];
+    const apiUrls: string[] = [];
     page.on("response", async (res: any) => {
       try {
+        const t = res.request().resourceType();
+        if (t === "xhr" || t === "fetch") apiUrls.push(`${res.status()} ${res.url()}`.slice(0, 160));
         if ((res.headers()["content-type"] ?? "").includes("json"))
           fromApi.push(...extractImages(await res.text()));
       } catch {}
@@ -140,7 +147,14 @@ async function renderWithBrowser(url: string): Promise<string[]> {
     await page.waitForNetworkIdle({ idleTime: 800, timeout: 15_000 }).catch(() => {});
     const dom: string[] = await page.$$eval("img", (els: any[]) =>
       els.map((e) => e.currentSrc || e.src || e.getAttribute("data-src") || ""));
-    return [...new Set([...fromApi, ...extractImages(dom.join("\n"))])];
+    const bodyText: string = await page.evaluate(() => document.body.innerText.slice(0, 200));
+    const images = [...new Set([...fromApi, ...extractImages(dom.join("\n"))])];
+    return {
+      images,
+      note: `browser ok, gambar=${images.length}; xhr/fetch=[${apiUrls.slice(0, 8).join(" | ")}]; teks="${bodyText.replace(/\s+/g, " ")}"`,
+    };
+  } catch (e: any) {
+    return { images: [], note: "render gagal: " + e.message };
   } finally {
     await browser.close();
   }
@@ -153,11 +167,16 @@ export const getChapter = (slug: string, id: string) =>
     const $ = cheerio.load(raw);
 
     let images = extractImages(raw);
-    if (images.length === 0) images = await renderWithBrowser(BASE + path);
+    let debug = `html=${raw.length}b, gambar di html=${images.length}`;
+    if (images.length === 0) {
+      const r = await renderWithBrowser(BASE + path);
+      images = r.images;
+      debug += "; " + r.note;
+    }
 
     const nav = (label: string) => {
       const href = $("a").filter((_, el) => clean($(el).text()) === label).attr("href") ?? "";
       return href.match(/\/chapter\/([^/?#]+)/)?.[1] ?? null;
     };
-    return { slug, id, images, prev: nav("Sebelumnya"), next: nav("Selanjutnya") };
+    return { slug, id, images, prev: nav("Sebelumnya"), next: nav("Selanjutnya"), debug };
   });
