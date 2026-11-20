@@ -79,8 +79,14 @@ export const getComic = (slug: string) =>
     $("a[href*='/chapter/']").each((_, el) => {
       const m = ($(el).attr("href") ?? "").match(/\/chapter\/([^/?#]+)/);
       if (!m || seen.has(m[1])) return;
+      let label = "";
+      $(el).find("*").addBack().contents().each((_: number, n: any) => {
+        if (label || n.type !== "text") return;
+        const t = clean(n.data ?? "");
+        if (/^Chapter\s+[\d._]+$/i.test(t)) label = t;
+      });
+      if (!label) return; // lewati "Baca Sekarang" dsb.
       seen.add(m[1]);
-      const label = clean($(el).text()).match(/^(Chapter\s+[\d._]+)/i)?.[1] ?? clean($(el).text());
       chapters.push({ id: m[1], label });
     });
     return {
@@ -105,23 +111,36 @@ function extractImages(raw: string): string[] {
   return uniq.filter((u) => !/\/(covers|hero-covers|settings|avatars)\//i.test(u));
 }
 
-async function renderWithPlaywright(url: string): Promise<string[]> {
-  let pw: any;
-  try { pw = await import("playwright"); } catch { return []; }
-  const browser = await pw.chromium.launch();
+async function renderWithBrowser(url: string): Promise<string[]> {
+  let chromium: any, puppeteer: any;
   try {
-    const page = await browser.newPage({ userAgent: UA });
-    await page.goto(url, { waitUntil: "networkidle", timeout: 45_000 });
-    // scroll agar lazy-load memuat semua halaman
-    await page.evaluate(async () => {
-      for (let y = 0; y < document.body.scrollHeight; y += 800) {
-        window.scrollTo(0, y);
-        await new Promise((r) => setTimeout(r, 150));
-      }
+    const c = "@sparticuz/chromium", p = "puppeteer-core";
+    chromium = (await import(c)).default;
+    puppeteer = (await import(p)).default;
+  } catch { return []; }
+  const browser = await puppeteer.launch({
+    args: chromium.args,
+    executablePath: await chromium.executablePath(),
+    headless: true,
+  });
+  try {
+    const page = await browser.newPage();
+    await page.setUserAgent(UA);
+    await page.setRequestInterception(true);
+    page.on("request", (r: any) =>
+      ["font", "stylesheet", "media"].includes(r.resourceType()) ? r.abort() : r.continue());
+    const fromApi: string[] = [];
+    page.on("response", async (res: any) => {
+      try {
+        if ((res.headers()["content-type"] ?? "").includes("json"))
+          fromApi.push(...extractImages(await res.text()));
+      } catch {}
     });
-    const srcs: string[] = await page.$$eval("img", (els: any[]) =>
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 25_000 });
+    await page.waitForNetworkIdle({ idleTime: 800, timeout: 15_000 }).catch(() => {});
+    const dom: string[] = await page.$$eval("img", (els: any[]) =>
       els.map((e) => e.currentSrc || e.src || e.getAttribute("data-src") || ""));
-    return extractImages(srcs.join("\n"));
+    return [...new Set([...fromApi, ...extractImages(dom.join("\n"))])];
   } finally {
     await browser.close();
   }
@@ -134,7 +153,7 @@ export const getChapter = (slug: string, id: string) =>
     const $ = cheerio.load(raw);
 
     let images = extractImages(raw);
-    if (images.length === 0) images = await renderWithPlaywright(BASE + path);
+    if (images.length === 0) images = await renderWithBrowser(BASE + path);
 
     const nav = (label: string) => {
       const href = $("a").filter((_, el) => clean($(el).text()) === label).attr("href") ?? "";
